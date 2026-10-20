@@ -1,0 +1,90 @@
+schema: spec-driven
+
+context: |
+  Write all artifacts in Spanish.
+
+  Proyecto: plataforma web de venta de PCs y componentes con armador manual,
+  asistente de IA y motor de reglas de compatibilidad. Punto crítico: concurrencia
+  (300 usuarios simultáneos sobre stock limitado, sin sobreventa).
+
+  Documentación fuente (leer antes de proponer, diseñar o implementar):
+  - docs/00_parte_tecnica.md: contexto fijo. Stack, estructura del repo, modelo
+    de datos, reglas de concurrencia, reglas de construcción. Leer SIEMPRE completo.
+  - docs/sprint_0X_*.md: historias de usuario por sprint. Leer solo el del sprint
+    del cambio actual (y la sección de dependencias que cite).
+
+  Stack obligatorio (no proponer otras tecnologías):
+  monorepo con apps/web (Next.js en Vercel) y apps/api (NestJS + TypeScript estricto
+  en Render); PostgreSQL en Neon con Prisma; Redis en Upstash (ioredis, scripts Lua);
+  LLM Claude detrás de la interfaz intercambiable ProveedorIA. Docker solo para
+  desarrollo local y k6. Sin colas de mensajes, sin balanceador, sin otra base de datos.
+
+  Decisiones fijadas (docs/00_parte_tecnica.md secciones 2.1 y 10):
+  - Dominio xdtech.store (DNS en Cloudflare); API en api.xdtech.store.
+  - Sesión por cookie httpOnly con token opaco; en la tabla sesiones de Postgres solo
+    se guarda el hash del token. No usar JWT. CORS con credenciales solo para el
+    origen del frontend.
+  - Rate limiting: registro por IP; login por correo y por IP; asistente por usuario
+    contando filas de uso_asistente (24 h). Contadores de registro/login en memoria
+    (@nestjs/throttler), NUNCA en Redis (la cuota de Upstash es para stock y reservas).
+    IP real vía trust proxy.
+  - Limpieza de sesiones vencidas/revocadas: tarea diaria y al iniciar sesión.
+  - El dominio xdtech.store es el único costo y es prerrequisito del Sprint 0.
+  - HU-03 (recuperación de acceso) está DIFERIDA: no crear endpoints, tablas ni
+    integración de correo. El proyecto no envía correos.
+
+  Reglas de concurrencia de docs/00_parte_tecnica.md sección 5 son no negociables:
+  Postgres es la fuente de verdad; Redis guarda el disponible para vender; reservar
+  y expirar con scripts Lua atómicos; confirmar con transacción Postgres condicional
+  e Idempotency-Key; reconciliación periódica; la IA nunca participa en concurrencia
+  ni en cobro.
+
+  Los sprints se implementan en orden. Cada cambio de OpenSpec cubre un sprint
+  (o un subconjunto de sus HU) y no adelanta funcionalidad de sprints posteriores.
+  Lo de sprints anteriores se asume existente.
+
+rules:
+  proposal:
+    - Indicar el sprint y las historias de usuario (HU-xx) que cubre el cambio
+    - Declarar fuera de alcance lo que pertenece a sprints posteriores
+  specs:
+    - Derivar los escenarios de los criterios de aceptación de cada HU, sin omitir ninguno
+    - Referenciar el código HU-xx en cada requisito
+  design:
+    - Respetar la estructura de carpetas y el modelo de datos de docs/00_parte_tecnica.md
+    - Si el cambio toca stock, reservas o pagos, explicar cómo cumple cada regla de la sección 5
+  tasks:
+    - Partir de las tareas listadas en el sprint correspondiente
+    - Incluir pruebas unitarias por módulo e integración contra Postgres y Redis en Docker
+    - Cerrar con la verificación de la definición de hecho del sprint
+
+# Project context (optional)
+# Add only constraints that should guide OpenSpec artifacts and workflows.
+# Include constraints an agent cannot infer by reading the code.
+# Keep general project documentation and discoverable codebase facts out.
+# Example:
+#   context: |
+#     Designs and tasks must cover Windows, macOS, and Linux
+#     Write all artifacts in Spanish
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
