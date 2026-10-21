@@ -1,0 +1,10 @@
+pnpm-lock.yaml
+**/dist/
+**/.next/
+**/coverage/
+apps/api/src/generated/
+docs/
+openspec/
+.agents/
+.claude/
+**/next-env.d.ts

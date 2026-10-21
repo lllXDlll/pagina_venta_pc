@@ -1,0 +1,14 @@
+packages:
+  - apps/*
+
+# Paquetes a los que pnpm permite ejecutar scripts de instalación
+onlyBuiltDependencies:
+  - '@prisma/engines'
+  - prisma
+
+# Usan binarios precompilados; su script de instalación no hace falta
+ignoredBuiltDependencies:
+  - '@nestjs/core'
+  - '@parcel/watcher'
+  - sharp
+  - unrs-resolver

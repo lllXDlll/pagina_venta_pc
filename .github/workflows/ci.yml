@@ -1,0 +1,75 @@
+# Integración continua (design D7): cada push y cada PR a main.
+# Las pruebas de integración usan el Postgres y el Redis de este job; nunca Neon ni Upstash.
+# Este archivo no contiene credenciales de producción: solo las de desarrollo de los servicios del job.
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: xdtech
+          POSTGRES_PASSWORD: xdtech
+          POSTGRES_DB: xdtech
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U xdtech -d xdtech"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://xdtech:xdtech@localhost:5432/xdtech?connect_timeout=30
+      DIRECT_URL: postgresql://xdtech:xdtech@localhost:5432/xdtech
+      REDIS_URL: redis://localhost:6379
+      COOKIE_DOMAIN: ''
+      FRONTEND_ORIGIN: http://localhost:3000
+      SESSION_TTL_DAYS: '7'
+      TRUST_PROXY_HOPS: '1'
+      DIAGNOSTICO_HABILITADO: 'false'
+      MIGRAR_AL_ARRANCAR: 'false'
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Migrar base de datos de CI
+        run: pnpm --filter api db:migrate
+
+      - name: Pruebas unitarias
+        run: pnpm test
+
+      - name: Pruebas de integración
+        run: pnpm test:e2e
+
+      - name: Build
+        run: pnpm build

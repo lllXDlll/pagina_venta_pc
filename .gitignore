@@ -30,3 +30,6 @@ desktop.ini
 
 # Configuración local de Claude Code
 .claude/settings.local.json
+
+# Cliente de Prisma generado (prisma generate)
+apps/api/src/generated/

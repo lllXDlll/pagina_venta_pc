@@ -1,0 +1,52 @@
+{
+  "name": "api",
+  "version": "0.0.1",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "start": "nest start",
+    "start:prod": "node dist/main",
+    "lint": "eslint --config ../../eslint.config.mjs .",
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
+    "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./jest.e2e.config.mjs --runInBand",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:status": "prisma migrate status",
+    "smoke:lua": "tsx scripts/smoke/lua-trivial.ts",
+    "smoke:comandos": "tsx scripts/smoke/comandos-reserva.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.2.0",
+    "@nestjs/core": "^12.2.0",
+    "@nestjs/platform-express": "^12.2.0",
+    "@nestjs/terminus": "^12.1.0",
+    "@prisma/adapter-pg": "~7.10.1",
+    "@prisma/client": "~7.10.1",
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.1",
+    "prisma": "~7.10.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@jest/globals": "^30.5.2",
+    "@nestjs/cli": "^12.0.10",
+    "@nestjs/schematics": "^12.0.10",
+    "@nestjs/testing": "^12.2.0",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^7.2.1",
+    "jest": "^30.5.2",
+    "source-map-support": "^0.5.21",
+    "supertest": "^7.3.1",
+    "ts-jest": "^29.4.15",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3"
+  }
+}
