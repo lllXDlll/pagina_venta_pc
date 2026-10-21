@@ -20,16 +20,19 @@ Fuera de alcance: pasarelas de pago reales, logística de envío, garantías y s
 
 Notas operativas:
 - Docker solo para desarrollo local y pruebas de carga. No hay cola de mensajes ni balanceador en la nube.
-- Neon requiere dos cadenas de conexión: pooler para la app y directa para migraciones.
-- Render gratuito se apaga tras ~15 min sin tráfico (~1 min en despertar): exponer `GET /health` para un monitor externo. Solo la API se despliega en Render.
-- Upstash gratuito limita comandos mensuales: las pruebas repetidas de concurrencia se hacen contra Redis local.
+- Neon requiere dos cadenas de conexión: pooler para la app y directa para migraciones. Plan gratuito: 100 CU-hours por proyecto al mes; el cómputo se suspende tras 5 min sin actividad y eso no se puede cambiar. Cualquier consulta periódica a Postgres (como un monitor) impide la suspensión y agota las horas en unos 16 a 17 días.
+- Render gratuito: 750 horas de instancia al mes por workspace y se apaga tras 15 min sin tráfico (~1 min en despertar). Una sola instancia encendida las 24 horas cabe en las 750 horas, así que solo la API se despliega en Render. Bloquea los puertos SMTP salientes (25, 465, 587).
+- Upstash gratuito: 500K comandos al mes. Las pruebas repetidas de concurrencia se hacen contra Redis local.
+- **Endpoints de salud:** `GET /health/live` (sin dependencias, responde 200) es el único que usa el monitor externo (UptimeRobot, cada 5 min) para mantener despierto a Render sin tocar Neon ni Upstash. `GET /health/ready` verifica Postgres y Redis y se usa solo en CI y a mano; nunca desde el monitor. Tras un rato sin tráfico, la primera petición real despierta a Neon; configurar un tiempo de espera de conexión holgado en Prisma (`connect_timeout`, 30 s por defecto).
+- **Despliegue continuo desde el Sprint 0:** cada push a `main` despliega el frontend en Vercel y la API en Render; Render solo despliega si la CI de ese commit está en verde. Las ramas distintas de `main` generan previews de Vercel en `*.vercel.app`, que sirven para revisar la interfaz pero no para iniciar sesión (la cookie y CORS solo admiten `xdtech.store`). Hay un solo entorno de producción, sin *staging*.
+- **Migraciones al arrancar:** el comando de inicio de la API (`apps/api/scripts/start.sh`) ejecuta `prisma migrate deploy` con la conexión directa si `MIGRAR_AL_ARRANCAR=true` (solo en Render) y después arranca la API; si la migración falla, la versión nueva no arranca y Render mantiene la anterior. En local y en CI se migra explícitamente. Las migraciones siguen la regla *expand/contract* (sección 6).
 - El proyecto no envía correos: las notificaciones son dentro de la aplicación. No hay proveedor de correo ni configuración SPF/DKIM.
 - Costo: todo el stack usa planes gratuitos **excepto el dominio `xdtech.store`**, que tiene costo de compra y de renovación anual. Debe estar comprado y con su DNS administrado en Cloudflare **antes de empezar el Sprint 0**, porque HU-36a depende de él.
 
 ### 2.1 Dominio, sesión y límites de peticiones (decisiones fijadas)
 
 **Dominio y DNS.** Dominio propio `xdtech.store` con DNS en Cloudflare (CDN delante del frontend).
-- Frontend (Vercel): `xdtech.store` o `app.xdtech.store`.
+- Frontend (Vercel): `app.xdtech.store`. El dominio raíz `xdtech.store` redirige a `app.xdtech.store` con una redirección de Vercel.
 - API (Render): `api.xdtech.store`, registro DNS en modo solo DNS (nube gris), porque Render gestiona su propio certificado.
 - Frontend en Cloudflare: si se usa nube naranja, modo SSL "Full (strict)" y sin caché para `/api/*` ni para respuestas con `Set-Cookie`. Verificar la recomendación vigente de Vercel antes del despliegue final; la alternativa segura es DNS en nube gris.
 - Ambos subdominios son del mismo sitio para el navegador, por lo que no se usa proxy desde Next.js ni cookies de terceros.
@@ -46,14 +49,17 @@ Notas operativas:
 - **Registro:** límite por IP. Limitar por correo no protege, porque quien abusa cambia de correo en cada intento.
 - **Inicio de sesión:** límite por correo (frena fuerza bruta contra una cuenta) y, además, un límite por IP más holgado.
 - **Asistente de IA:** límite por usuario autenticado, contado a partir de las filas de `uso_asistente` de las últimas 24 horas (dato durable en Postgres, sin almacenamiento adicional).
-- **IP real del cliente:** el navegador llama directo a `api.xdtech.store` (nube gris), así que el único proxy en la cadena es el de Render. Configurar `trust proxy` en NestJS/Express para leer la IP real desde `X-Forwarded-For`, y verificarlo en el Sprint 0. Si la API pasara a nube naranja o detrás de otro proxy, habría que leer `CF-Connecting-IP`.
+- **IP real del cliente:** el navegador llama directo a `api.xdtech.store` (nube gris), así que el único proxy en la cadena es el de Render. Configurar `trust proxy` en NestJS/Express para leer la IP real desde `X-Forwarded-For`, con el número de saltos configurable (`TRUST_PROXY_HOPS`), y verificarlo en el Sprint 0. Si la API pasara a nube naranja o detrás de otro proxy, habría que leer `CF-Connecting-IP`.
 - **Dónde viven los contadores:** en memoria del proceso (almacenamiento por defecto de `@nestjs/throttler`). **No usar Redis** para esto: cada petición limitada gastaría comandos de la cuota mensual de Upstash, que se reserva para stock y reservas. Es válido porque hay una sola instancia de la API; los contadores se reinician si Render reinicia el servicio, y eso es aceptable. Si algún día hubiera varias instancias, habría que mover los contadores a un almacén compartido.
 - Los valores concretos son configurables por variables de entorno (ver sección 7).
 
 ## 3. Estructura del repositorio
 
+Monorepo con pnpm workspaces (sin Turborepo ni Nx). Node en la versión LTS vigente, fijada en `.nvmrc` y en `engines`. ESLint y Prettier compartidos en la raíz.
+
 ```
 repo/
+  pnpm-workspace.yaml    workspaces apps/*
   apps/
     web/                 Next.js (frontend)
     api/                 NestJS (backend)
@@ -70,6 +76,7 @@ repo/
         admin/           gestión y reportes
         health/          endpoints de salud
       prisma/            esquema y migraciones
+      scripts/           start.sh (migrar y arrancar) y smoke/ (pruebas de humo del Sprint 0)
   tests/
     k6/                  escenarios de carga
   docker-compose.yml     Postgres y Redis locales
@@ -99,6 +106,14 @@ Atributos técnicos esperados en JSONB: `socket`, `tipoRam`, `velocidadRam`, `ma
 
 Un equipo armado se registra como producto propio con su propio stock.
 
+Convenciones del esquema:
+- Modelos Prisma en PascalCase mapeados a las tablas en español y snake_case de esta tabla (`@@map`, `@map`).
+- Identificadores UUID (no autoincrementales, para no exponer volúmenes de venta en las URLs); el número correlativo del comprobante es una columna aparte.
+- Importes en `Decimal(12,2)`, nunca `float`. Estados y tipos como enumeraciones nativas de Postgres.
+- Unicidades: `usuarios.correo`, `sesiones.token_hash`, `ordenes.clave_idempotencia`. Índices: `sesiones` por usuario y por vencimiento; `reservas` por `(estado, vence_en)`.
+- `carrito_items` admite un producto **o** una configuración: dos claves foráneas opcionales y un `CHECK` (exactamente una no nula) añadido a mano en el SQL de la migración.
+- La migración inicial nunca se edita una vez aplicada en Neon; los cambios posteriores van en migraciones nuevas.
+
 ## 5. Reglas de concurrencia (no negociables)
 
 1. **Postgres guarda la verdad**: stock físico y compras confirmadas.
@@ -123,6 +138,8 @@ Estructuras en Redis: contador de disponible por producto (`disp:{productoId}`),
 - Contraseñas con argon2 o bcrypt; sesiones por cookie `httpOnly` guardadas en Postgres, con vencimiento (sección 2.1).
 - Límite de peticiones: registro (por IP), inicio de sesión (por correo y por IP) y asistente de IA (por usuario). Los contadores de registro e inicio de sesión viven en memoria, nunca en Redis; el límite del asistente se cuenta desde `uso_asistente` en Postgres (sección 2.1).
 - Pruebas unitarias junto a cada módulo; pruebas de integración contra Postgres y Redis reales en Docker.
+- La CI usa solo los Postgres y Redis levantados como servicios del pipeline; nunca contiene credenciales de Neon, Upstash ni de otros servicios de producción.
+- Migraciones *expand/contract*: durante un despliegue la versión anterior atiende sobre el esquema nuevo, así que las migraciones solo agregan (tablas, columnas opcionales o con valor por defecto, índices). Renombrar o eliminar se hace en dos despliegues: primero el código deja de usarlo y después se elimina. No se escriben migraciones de bajada.
 - No introducir tecnologías fuera del stack (sin colas de mensajes, sin balanceador, sin otra base de datos).
 - Cada sprint termina con: código en la rama principal, CI en verde y las pruebas del sprint pasando.
 
@@ -138,6 +155,9 @@ Estructuras en Redis: contador de disponible por producto (`disp:{productoId}`),
 | Límite de registro | 5 registros por hora por IP | Variable de entorno |
 | Límite de inicio de sesión | 5 intentos fallidos por 15 min por correo; 50 por 15 min por IP | Variable de entorno |
 | Límite del asistente | 10 consultas por 24 h por usuario | Variable de entorno |
+| Espera de conexión a Neon (`connect_timeout`) | 30 s | Cadena de conexión del pooler |
+| Saltos de proxy confiables (`TRUST_PROXY_HOPS`) | Según lo medido en el Sprint 0 | Variable de entorno |
+| Migrar al arrancar (`MIGRAR_AL_ARRANCAR`) | `true` en Render; `false` en local y CI | Variable de entorno |
 
 ## 8. Cómo trabajar con los sprints
 
@@ -172,10 +192,27 @@ Plan de recorte si el tiempo se acorta: mantener siempre concurrencia (Sprint 3)
 ### Recuperación de acceso por correo (HU-03, diferida)
 - **Requerimiento afectado:** RF-03 de la propuesta original, "recuperación de acceso mediante los mecanismos definidos para la aplicación".
 - **Decisión:** se difiere a una mejora futura y no se implementa en las 8 semanas.
-- **Justificación (para el informe):** exige un proveedor de correo externo, verificación del dominio emisor (SPF y DKIM) y un canal adicional que cuidar en un despliegue de planes gratuitos con un solo desarrollador. No participa en el objetivo central de la asignatura (consistencia del stock bajo concurrencia) ni en el flujo de compra. Además, el plan gratuito de Render podría bloquear los puertos SMTP salientes (a verificar), lo que obligaría a usar un proveedor por API HTTP.
+- **Justificación (para el informe):** exige un proveedor de correo externo, verificación del dominio emisor (SPF y DKIM) y un canal adicional que cuidar en un despliegue de planes gratuitos con un solo desarrollador. No participa en el objetivo central de la asignatura (consistencia del stock bajo concurrencia) ni en el flujo de compra. Además, el plan gratuito de Render bloquea los puertos SMTP salientes, lo que obligaría a usar un proveedor por API HTTP.
 - **Mitigación actual:** el registro y el inicio de sesión funcionan con normalidad; el usuario que olvide su contraseña debe registrar una cuenta nueva.
 - **Mejora futura sugerida:** recuperación por enlace de un solo uso enviado por correo, con un proveedor de API HTTP (por ejemplo Resend), dominio `xdtech.store` verificado, tabla `tokens_recuperacion` (token de un solo uso con vencimiento) y límite de peticiones por correo. Alternativa sin correo: restablecimiento de contraseña por un administrador desde el panel, con contraseña temporal.
 - **Efecto en los documentos:** se elimina HU-03 y la tabla `tokens_recuperacion`; no existen los endpoints `/auth/recuperar` ni `/auth/restablecer`.
 
 ### Criterio de trazabilidad
 Al cerrar el proyecto, RF-03 se reporta como "diferido con justificación", no como cumplido.
+
+## 11. Riesgos y mitigaciones
+
+| Riesgo | Impacto | Mitigación |
+|---|---|---|
+| Agotar los comandos mensuales de Upstash | Las reservas dejan de funcionar | Pruebas repetidas en Redis local, medición temprana del consumo (Sprint 0), contadores simples, límites de peticiones en memoria |
+| Arranque en frío de Render | Primera petición muy lenta en la demo | Monitor externo sobre `/health/live` y calentamiento previo; avisar a los evaluadores |
+| El monitor mantiene encendido a Neon | Se agotan las 100 CU-hours del mes | El monitor usa solo `/health/live` (sin dependencias); `/health/ready` solo en CI y a mano |
+| Una migración falla en Neon al desplegar | La versión nueva no arranca | Render mantiene la versión anterior (verificado en el Sprint 0); la CI ya aplicó la misma migración sobre una base limpia |
+| Una migración destructiva rompe la versión anterior durante el despliegue | Errores en producción | Regla *expand/contract* (sección 6) |
+| Redis pierde datos | Contadores de disponible incorrectos | Tabla de reservas en Postgres y reconciliación al arrancar y periódica |
+| La IA propone configuraciones inválidas | Mala experiencia | El motor de reglas siempre valida; un reintento con los motivos; respaldo determinístico |
+| La API de IA falla o se encarece | Asistente no disponible | Timeout, límite por usuario, proveedor intercambiable y respaldo determinístico |
+| La cookie entre subdominios o la IP real del cliente no funcionan | Sesiones o límites de peticiones rotos | Pruebas de humo en el Sprint 0, con plan B documentado antes del Sprint 1 |
+| Cambios en los planes gratuitos | Despliegue inestable | Confirmar límites antes de la demo y mantener la opción de ejecutar todo con Docker local |
+| El dominio es el único costo | `xdtech.store` no disponible al empezar | Comprarlo y configurar su DNS en Cloudflare antes del Sprint 0 |
+| Alcance excesivo para 8 semanas | Retrasos | Concurrencia y compra primero; reportes y refinamientos al final (plan de recorte en la sección 9) |
