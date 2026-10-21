@@ -36,8 +36,8 @@
 
 ## 5. Integración continua
 
-- [ ] 5.1 Crear `.github/workflows/ci.yml` (en cada push y en los PR a `main`) con caché de pnpm, lint, `prisma migrate deploy`, pruebas unitarias, pruebas de integración con los servicios `postgres` y `redis`, y build de ambas apps (D7); verificar con un push que la ejecución termina en verde
-- [ ] 5.2 Comprobar que la CI falla ante errores: hacer push en una rama de prueba con un error de lint deliberado y verificar que la ejecución termina en rojo indicando la etapa; luego borrar la rama
+- [x] 5.1 Crear `.github/workflows/ci.yml` (en cada push y en los PR a `main`) con caché de pnpm, lint, `prisma migrate deploy`, pruebas unitarias, pruebas de integración con los servicios `postgres` y `redis`, y build de ambas apps (D7); verificar con un push que la ejecución termina en verde
+- [x] 5.2 Comprobar que la CI falla ante errores: hacer push en una rama de prueba con un error de lint deliberado y verificar que la ejecución termina en rojo indicando la etapa; luego borrar la rama
 - [x] 5.3 Revisar que `ci.yml` no contiene credenciales de Neon, Upstash ni de otros servicios de producción, y verificarlo buscando esas cadenas en el repositorio
 
 ## 6. Despliegue vacío
